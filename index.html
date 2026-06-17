@@ -51,6 +51,9 @@
       <label class="file">transforms.json
         <input type="file" id="file-tr" accept=".json">
       </label>
+      <label class="file chk" title="Si coché, le drag & drop demande où placer chaque fichier au lieu de deviner.">
+        <input type="checkbox" id="ask-assign"> Demander l'assignation (drag &amp; drop)
+      </label>
     </div>
 
     <!-- Barre d'outils -->
@@ -94,6 +97,29 @@
     </div>
 
     <pre class="debug" id="debug">initialisation…</pre>
+  </div>
+
+  <!-- Boîte de dialogue d'assignation (drag & drop) -->
+  <div id="assign-modal">
+    <div class="dialog">
+      <h3>Assigner les fichiers déposés</h3>
+      <p class="hint">Choisis le layer de chaque fichier (pré-rempli automatiquement).</p>
+      <div id="assign-rows"></div>
+      <div class="actions">
+        <button id="assign-cancel" class="ghost">Annuler</button>
+        <button id="assign-ok" class="primary">Charger</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Overlay drag & drop -->
+  <div id="drop-overlay">
+    <div class="box">
+      <div class="ico">📂</div>
+      <div class="t">Dépose tes nuages ici</div>
+      <small>.ply · .las · .laz · .npz &nbsp;—&nbsp; et <code>transforms.json</code><br>
+      noms <b>T0 / T1 / T0_A / T1_A</b> reconnus automatiquement</small>
+    </div>
   </div>
 
   <script type="module" src="app.js"></script>

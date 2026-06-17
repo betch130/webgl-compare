@@ -48,6 +48,7 @@ const S = {
   transforms: { A: identity(), B: identity() },
   mode: "trans",
   colorMode: "rgb",
+  askAssign: false,          // drag&drop : true = demander, false = auto
   pointSize: CFG.pointSize,
   sliderRatio: 0.5,          // slider vertical (x, 0..1 depuis la gauche)
   sliderRatioY: 0.5,         // slider horizontal (y, 0..1 depuis le haut) — mode quad
@@ -273,6 +274,8 @@ function initThree() {
 
   resize();
   window.addEventListener("resize", resize);
+  // suit toute variation de taille du stage (layout flex, fullscreen, scroll…)
+  if (window.ResizeObserver) new ResizeObserver(() => resize()).observe(stage);
   animate();
 }
 
@@ -426,6 +429,9 @@ function setupUI() {
   document.getElementById("file-t0a").addEventListener("change", (e) => onFile("t0a", e.target.files[0]));
   document.getElementById("file-t1a").addEventListener("change", (e) => onFile("t1a", e.target.files[0]));
 
+  // Réglage drag&drop : demander l'assignation, ou auto
+  document.getElementById("ask-assign").addEventListener("change", (e) => { S.askAssign = e.target.checked; });
+
   // transforms.json
   document.getElementById("file-tr").addEventListener("change", async (e) => {
     const f = e.target.files[0]; if (!f) return;
@@ -458,6 +464,142 @@ function toggleFullscreen() {
   const card = document.getElementById("card");
   if (!document.fullscreenElement) card.requestFullscreen?.();
   else document.exitFullscreen?.();
+}
+
+/* ============================================================================
+ * 8b) DRAG & DROP INTELLIGENT
+ * --------------------------------------------------------------------------
+ * Dépose 1 à 4 nuages (+ éventuellement transforms.json) n'importe où.
+ * Chaque fichier est assigné à un slot selon son nom ; les fichiers non
+ * reconnus remplissent les slots vides dans l'ordre T0, T1, T0_A, T1_A.
+ * ==========================================================================*/
+
+const SLOT_LABEL = { t0: "T0", t1: "T1", t0a: "T0_A", t1a: "T1_A" };
+
+/** Devine le slot depuis le nom de fichier (null si inconnu). */
+function classifySlot(name) {
+  const n = name.toLowerCase().replace(/\.(ply|las|laz|npz)$/i, "");
+  if (/(^|[^0-9])0[ _-]?a\b/.test(n) || /t0[ _-]?a/.test(n)) return "t0a";
+  if (/(^|[^0-9])1[ _-]?a\b/.test(n) || /t1[ _-]?a/.test(n)) return "t1a";
+  if (/t0|pointcloud0|cloud0|pc0|[ _-]0(\b|[ _.-])/.test(n)) return "t0";
+  if (/t1|pointcloud1|cloud1|pc1|[ _-]1(\b|[ _.-])/.test(n)) return "t1";
+  return null;
+}
+
+function hasFiles(e) {
+  return e.dataTransfer && Array.from(e.dataTransfer.types || []).includes("Files");
+}
+
+/** Devine un mapping slot→fichier (nom + repli sur slots vides). */
+function autoAssignMap(clouds) {
+  const order = ["t0", "t1", "t0a", "t1a"];
+  const map = {};
+  for (const f of clouds) {
+    let slot = classifySlot(f.name);
+    if (slot && map[slot]) slot = null;
+    if (!slot) slot = order.find(s => !map[s] && !S.raw[s]) || order.find(s => !map[s]);
+    if (slot) map[slot] = f;
+  }
+  return map;
+}
+
+async function applyTransformsFile(tr) {
+  if (!tr) return;
+  try {
+    const j = JSON.parse(await tr.text());
+    S.transforms.A = j.A || identity();
+    S.transforms.B = j.B || identity();
+  } catch (e) { console.warn("transforms.json invalide", e); }
+}
+
+/** Charge un mapping slot→fichier + transforms.json éventuel. */
+async function loadAssignments(map, tr) {
+  await applyTransformsFile(tr);
+  const order = ["t0", "t1", "t0a", "t1a"];
+  const msgs = [];
+  for (const slot of order) {
+    const f = map[slot];
+    if (!f) continue;
+    try {
+      const data = await loadPointCloud(f, f.name);
+      S.raw[slot] = { data, path: f.name };
+      msgs.push(`${SLOT_LABEL[slot]} ← ${f.name}`);
+    } catch (e) {
+      msgs.push(`⚠️ ${f.name} : ${e.message}`);
+    }
+  }
+  if (S.raw.t0 && S.raw.t1) await rebuildLayers();
+  setStatus("Assignation : " + (msgs.join("   |   ") || "(rien)") +
+            (S.raw.t0 && S.raw.t1 ? "" : "  —  il faut au moins T0 et T1."));
+}
+
+/** Point d'entrée du drop : auto, ou ouverture du dialogue selon le réglage. */
+function handleDrop(files) {
+  const tr = files.find(f => /\.json$/i.test(f.name));
+  const clouds = files.filter(f => /\.(ply|las|laz|npz)$/i.test(f.name));
+  if (!clouds.length && !tr) { setStatus("Aucun fichier exploitable déposé."); return; }
+  if (S.askAssign && clouds.length) openAssignDialog(clouds, tr);
+  else loadAssignments(autoAssignMap(clouds), tr);
+}
+
+/** Boîte de dialogue : choisir le slot de chaque fichier (pré-rempli par la devinette). */
+function openAssignDialog(clouds, tr) {
+  const modal = document.getElementById("assign-modal");
+  const body = document.getElementById("assign-rows");
+  const guess = autoAssignMap(clouds);
+  const fileSlot = new Map();
+  for (const s in guess) fileSlot.set(guess[s], s);
+
+  const OPTS = [["t0","T0"],["t1","T1"],["t0a","T0_A"],["t1a","T1_A"],["","(ignorer)"]];
+  body.innerHTML = "";
+  clouds.forEach((f, i) => {
+    const row = document.createElement("div");
+    row.className = "assign-row";
+    const name = document.createElement("span");
+    name.className = "fname"; name.textContent = f.name;
+    const sel = document.createElement("select");
+    sel.dataset.idx = i;
+    for (const [v, t] of OPTS) {
+      const o = document.createElement("option");
+      o.value = v; o.textContent = t; sel.appendChild(o);
+    }
+    sel.value = fileSlot.get(f) || "";
+    row.append(name, sel);
+    body.appendChild(row);
+  });
+  if (tr) {
+    const note = document.createElement("div");
+    note.className = "assign-note";
+    note.textContent = `transforms.json : ${tr.name} (matrice A appliquée en repli)`;
+    body.appendChild(note);
+  }
+
+  modal.classList.add("show");
+  const ok = document.getElementById("assign-ok");
+  const cancel = document.getElementById("assign-cancel");
+  const close = () => { modal.classList.remove("show"); ok.onclick = cancel.onclick = null; };
+  cancel.onclick = () => { close(); setStatus("Assignation annulée."); };
+  ok.onclick = async () => {
+    const map = {};
+    body.querySelectorAll("select").forEach((sel) => {
+      if (sel.value) map[sel.value] = clouds[+sel.dataset.idx];  // dernier gagne si doublon
+    });
+    close();
+    await loadAssignments(map, tr);
+  };
+}
+
+function setupDragDrop() {
+  const overlay = document.getElementById("drop-overlay");
+  let depth = 0;                                   // compteur pour éviter le clignotement
+  window.addEventListener("dragenter", (e) => { if (hasFiles(e)) { depth++; overlay.classList.add("show"); } });
+  window.addEventListener("dragover",  (e) => { if (hasFiles(e)) e.preventDefault(); });
+  window.addEventListener("dragleave", () => { depth = Math.max(0, depth - 1); if (!depth) overlay.classList.remove("show"); });
+  window.addEventListener("drop", async (e) => {
+    if (!hasFiles(e)) return;
+    e.preventDefault(); depth = 0; overlay.classList.remove("show");
+    await handleDrop([...e.dataTransfer.files]);
+  });
 }
 
 /* ============================================================================
@@ -534,6 +676,7 @@ async function init() {
   initThree();
   setupSlider();
   setupUI();
+  setupDragDrop();
   try {
     const ok = await tryAutoload();
     if (!ok) setStatus("Prêt. Charge un nuage T0 et un nuage T1 (.ply/.las/.laz/.npz) via les boutons en haut.");

@@ -22,6 +22,9 @@ body{ display:flex; align-items:center; justify-content:center; padding:24px; }
   width:min(1200px,100%); background:var(--card);
   border-radius:var(--radius-card); box-shadow:var(--shadow);
   padding:22px; display:flex; flex-direction:column; gap:14px;
+  /* la carte ne dépasse jamais la fenêtre ; scroll interne si besoin */
+  max-height:calc(100vh - 48px);
+  overflow:auto;
 }
 
 .card-header{ display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; }
@@ -42,6 +45,8 @@ body{ display:flex; align-items:center; justify-content:center; padding:24px; }
   background:#f7f8fb; border:1px solid #e2e6ee; border-radius:11px; padding:8px 12px;
 }
 .loaders input[type=file]{ font-size:12px; max-width:230px; }
+.loaders .chk{ cursor:pointer; gap:6px; }
+.loaders .chk input{ cursor:pointer; }
 
 /* Barre d'outils */
 .toolbar{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
@@ -55,7 +60,8 @@ body{ display:flex; align-items:center; justify-content:center; padding:24px; }
 
 /* Scène */
 .stage{
-  position:relative; width:100%; height:70vh; min-height:420px;
+  position:relative; width:100%;
+  flex:1 1 auto; min-height:280px;   /* occupe l'espace restant de la carte */
   border-radius:var(--radius-view); overflow:hidden; background:#0e1116;
   touch-action:none; user-select:none;
 }
@@ -118,10 +124,61 @@ body{ display:flex; align-items:center; justify-content:center; padding:24px; }
   white-space:pre-wrap; word-break:break-word; max-height:210px; overflow:auto;
 }
 
+/* Boîte de dialogue d'assignation */
+#assign-modal{
+  position:fixed; inset:0; z-index:1100; display:none;
+  align-items:center; justify-content:center;
+  background:rgba(15,17,22,.45); backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px);
+}
+#assign-modal.show{ display:flex; }
+#assign-modal .dialog{
+  width:min(520px,92vw); background:#fff; border-radius:18px; box-shadow:var(--shadow);
+  padding:22px; max-height:86vh; overflow:auto;
+}
+#assign-modal h3{ margin:0 0 4px; font-size:17px; }
+#assign-modal .hint{ margin:0 0 14px; color:var(--muted); font-size:13px; }
+.assign-row{
+  display:flex; align-items:center; gap:12px; padding:8px 0; border-top:1px solid #eef1f6;
+}
+.assign-row .fname{ flex:1; font-size:13px; word-break:break-all; }
+.assign-row select{
+  font-size:13px; padding:6px 10px; border:1px solid #dfe3ea; border-radius:10px; background:#fff; cursor:pointer;
+}
+.assign-note{ margin-top:10px; font-size:12px; color:var(--muted); }
+#assign-modal .actions{ display:flex; justify-content:flex-end; gap:10px; margin-top:18px; }
+#assign-modal .actions button{
+  font-size:14px; padding:9px 18px; border-radius:11px; cursor:pointer; border:1px solid #e2e6ee;
+}
+#assign-modal .actions .ghost{ background:#f7f8fb; color:var(--ink); }
+#assign-modal .actions .primary{ background:var(--accent); color:#fff; border-color:var(--accent); }
+
+/* Overlay drag & drop */
+#drop-overlay{
+  position:fixed; inset:0; z-index:1000; display:none;
+  align-items:center; justify-content:center;
+  background:rgba(37,99,235,.14); backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px);
+}
+#drop-overlay.show{ display:flex; }
+#drop-overlay .box{
+  border:2px dashed var(--accent); border-radius:18px;
+  background:rgba(255,255,255,.95); box-shadow:var(--shadow);
+  padding:30px 42px; text-align:center; color:var(--ink); max-width:90vw;
+}
+#drop-overlay .ico{ font-size:40px; }
+#drop-overlay .t{ font-size:17px; font-weight:650; margin:8px 0 6px; }
+#drop-overlay small{ color:var(--muted); line-height:1.6; }
+#drop-overlay code{ background:#eef1f7; padding:1px 6px; border-radius:6px; }
+
 @media (max-width:720px){
-  body{ padding:10px; } .card{ padding:14px; border-radius:16px; }
-  .stage{ height:60vh; min-height:340px; }
+  body{ padding:10px; } .card{ padding:14px; border-radius:16px; max-height:calc(100vh - 20px); }
+  .stage{ min-height:240px; }
   .card-header{ flex-direction:column; align-items:stretch; }
   .toolbar button{ flex:1 1 auto; }
   .loaders input[type=file]{ max-width:150px; }
+}
+
+/* Très peu de hauteur : on laisse la carte défiler plutôt que tronquer */
+@media (max-height:560px){
+  .stage{ min-height:200px; }
+  .debug{ max-height:120px; }
 }

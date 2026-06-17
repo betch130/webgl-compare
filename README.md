@@ -22,6 +22,9 @@ transformed/aligned versions (T0_A / T1_A) side by side.
   shared camera (no camera-sync drift).
 - 🔳 **4-quadrant mode** — vertical **and** horizontal sliders to view T0, T1,
   T0_A, T1_A simultaneously.
+- 🪄 **Smart drag & drop** — drop 1–4 clouds (plus an optional `transforms.json`)
+  anywhere; files are auto-assigned to `T0 / T1 / T0_A / T1_A` by name, with
+  fallback to the next empty slot.
 - 📦 **Direct loaders** for `.ply` (ASCII + binary, little/big-endian), `.las`
   (uncompressed, double-precision coords), `.laz` (compressed) and `.npz`
   (NumPy archive).
@@ -56,6 +59,15 @@ Open <http://localhost:8080/>, then load a cloud into **T0** and another into
 ---
 
 ## 📥 Loading data
+
+**Drag & drop** (recommended): drop one or several files anywhere on the page.
+Each cloud is auto-assigned to a slot from its filename (`t0`, `t1`, `t0_A`,
+`t1_A`, also `pointCloud0/1`, `pc0/1`, …); anything unrecognized fills the next
+empty slot in order. A dropped `transforms.json` updates matrix `A`.
+
+> Tick **“Demander l'assignation”** to get a dialog after each drop where you
+> choose the slot for every file (pre-filled with the smart guess) — otherwise
+> assignment is fully automatic.
 
 **Buttons** `T0`, `T1`, `T0_A`, `T1_A` accept any `.ply / .las / .laz / .npz`.
 
