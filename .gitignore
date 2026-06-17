@@ -1,0 +1,15 @@
+# Données de nuages (souvent volumineuses) — ne pas committer par défaut
+pointclouds/*
+!pointclouds/.gitkeep
+
+# Capture d'écran : garde docs/ mais ignore les gros médias si besoin
+# docs/*.mp4
+
+# OS / éditeurs
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Divers
+*.log

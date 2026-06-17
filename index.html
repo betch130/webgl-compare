@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Comparateur 3D maison — PLY / LAS / LAZ / NPZ</title>
+  <link rel="stylesheet" href="style.css">
+
+  <!-- three.js via import map (CDN). Pas de Potree. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+
+<body>
+  <div class="card" id="card">
+
+    <header class="card-header">
+      <h1>Comparateur de nuages 3D</h1>
+      <div class="mode-picker">
+        <label for="mode">Mode</label>
+        <select id="mode">
+          <option value="raw">T0 vs T1</option>
+          <option value="trans" selected>T0_A vs T1_A</option>
+          <option value="t0">T0 vs T0_A</option>
+          <option value="t1">T1 vs T1_A</option>
+          <option value="quad">4 vues (quadrants)</option>
+        </select>
+      </div>
+    </header>
+
+    <!-- Chargement de fichiers -->
+    <div class="loaders">
+      <label class="file">T0
+        <input type="file" id="file-t0" accept=".ply,.las,.laz,.npz">
+      </label>
+      <label class="file">T1
+        <input type="file" id="file-t1" accept=".ply,.las,.laz,.npz">
+      </label>
+      <label class="file">T0_A
+        <input type="file" id="file-t0a" accept=".ply,.las,.laz,.npz">
+      </label>
+      <label class="file">T1_A
+        <input type="file" id="file-t1a" accept=".ply,.las,.laz,.npz">
+      </label>
+      <label class="file">transforms.json
+        <input type="file" id="file-tr" accept=".json">
+      </label>
+    </div>
+
+    <!-- Barre d'outils -->
+    <div class="toolbar" id="toolbar">
+      <button data-action="reset">Reset caméra</button>
+      <button data-action="rgb">RGB original</button>
+      <button data-action="fixed">Couleurs fixes</button>
+      <button data-action="t0t1">T0 bleu / T1 rouge</button>
+      <span class="sep"></span>
+      <button data-action="size-plus">Point +</button>
+      <button data-action="size-minus">Point −</button>
+      <span class="sep"></span>
+      <button data-action="fullscreen">Plein écran</button>
+    </div>
+
+    <!-- Scène : un seul canvas (rempli par three.js) + slider/labels en overlay -->
+    <div class="stage" id="stage">
+      <!-- labels mode 2-à-2 -->
+      <div class="layer-label label-left"  id="label-left">T0</div>
+      <div class="layer-label label-right" id="label-right">T1</div>
+      <!-- labels mode quadrants -->
+      <div class="layer-label quad tl" id="label-tl">T0</div>
+      <div class="layer-label quad tr" id="label-tr">T1</div>
+      <div class="layer-label quad bl" id="label-bl">T0_A</div>
+      <div class="layer-label quad br" id="label-br">T1_A</div>
+
+      <!-- slider vertical (toujours actif) -->
+      <div class="slider" id="slider">
+        <div class="slider-line"></div>
+        <div class="slider-handle">
+          <span class="arrow">‹</span><span class="arrow">›</span>
+        </div>
+      </div>
+      <!-- slider horizontal (mode quadrants uniquement) -->
+      <div class="slider-h" id="slider-h">
+        <div class="slider-h-line"></div>
+        <div class="slider-handle">
+          <span class="arrow up">‹</span><span class="arrow down">›</span>
+        </div>
+      </div>
+    </div>
+
+    <pre class="debug" id="debug">initialisation…</pre>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
