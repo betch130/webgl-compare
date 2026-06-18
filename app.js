@@ -199,6 +199,51 @@ async function rebuildLayers() {
  * 4) MODE DE COMPARAISON
  * ==========================================================================*/
 
+/** Nom de fichier seul (sans chemin) d'un layer, "" si absent. */
+function layerFileName(name) {
+  const p = S.layers[name] && S.layers[name].path;
+  return p ? p.split(/[\\/]/).pop() : "";
+}
+
+/** Chip de coin : juste le nom de fichier (le slot est porté par la légende du slider). */
+function setLabel(id, slot) {
+  const el = document.getElementById(id);
+  const file = layerFileName(slot);
+  el.style.display = file ? "" : "none";   // masqué tant que rien n'est chargé
+  el.innerHTML = "";
+  if (!file) return;
+  const f = document.createElement("span");
+  f.className = "ll-file"; f.textContent = file; f.title = slot + " — " + file;
+  el.appendChild(f);
+}
+
+/** Une puce de légende de slider (texte + classe couleur). */
+function capChip(text, cls) {
+  const s = document.createElement("span");
+  s.className = "cap-side" + (cls ? " " + cls : "");
+  s.textContent = text;
+  return s;
+}
+
+/** Légende attachée à chaque slider : ce qu'on voit de part et d'autre.
+ *  Vertical → gauche/droite ; horizontal (quad) → haut/bas. */
+function setSliderCaptions(key) {
+  const capV = document.getElementById("cap-v");
+  const capH = document.getElementById("cap-h");
+  capV.innerHTML = ""; capH.innerHTML = "";
+  const epoch = (slot) => (slot.startsWith("T0") ? "t0" : "t1");
+
+  if (key === "quad") {
+    // vertical = époques (T0 ◀ ▶ T1) ; horizontal = brut ▲ ▼ aligné ×A
+    capV.append(capChip("◀ T0", "t0"), capChip("T1 ▶", "t1"));
+    capH.append(capChip("▲ T0 · T1", "raw"), capChip("T0_A · T1_A ▼", "acc"));
+  } else {
+    const m = MODES[key];
+    capV.append(capChip("◀ " + m.left, epoch(m.left)),
+                capChip(m.right + " ▶", epoch(m.right)));
+  }
+}
+
 function setMode(key) {
   if (!S.layers.T0) return;            // pas encore chargé
   S.mode = key;
@@ -207,18 +252,19 @@ function setMode(key) {
   if (key === "quad") {
     // 4 quadrants : on affiche les 2 sliders + 4 labels de coin
     stage.classList.add("quad-mode");
-    document.getElementById("label-tl").textContent = QUAD.TL;
-    document.getElementById("label-tr").textContent = QUAD.TR;
-    document.getElementById("label-bl").textContent = QUAD.BL;
-    document.getElementById("label-br").textContent = QUAD.BR;
+    setLabel("label-tl", QUAD.TL);
+    setLabel("label-tr", QUAD.TR);
+    setLabel("label-bl", QUAD.BL);
+    setLabel("label-br", QUAD.BR);
   } else {
     // comparaison 2-à-2 classique
     stage.classList.remove("quad-mode");
     const m = MODES[key];
-    document.getElementById("label-left").textContent  = m.left;
-    document.getElementById("label-right").textContent = m.right;
+    setLabel("label-left",  m.left);
+    setLabel("label-right", m.right);
   }
 
+  setSliderCaptions(key);
   applyColorMode();
   updateDebug();
 }
