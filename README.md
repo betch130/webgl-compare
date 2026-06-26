@@ -6,7 +6,7 @@ once. Built with **vanilla JavaScript + three.js** (no Potree, no build step).
 
 It loads **PLY, LAS, LAZ and NPZ** directly in the browser, and is designed for
 **LiDAR change-detection** workflows: compare two epochs (T0 / T1) and their
-transformed/aligned versions (T0_A / T1_A) side by side.
+aligned counterparts (T0_A / T1_A), each loaded as a file, side by side.
 
 > The UI labels are in French; the code is fully commented (French). Everything
 > else is language-agnostic.
@@ -20,20 +20,18 @@ transformed/aligned versions (T0_A / T1_A) side by side.
 
 - 🪟 **Before/after slider** — pixel-perfect split using a single renderer + one
   shared camera (no camera-sync drift).
-- 🔳 **4-quadrant mode** — vertical **and** horizontal sliders to view T0, T1,
-  T0_A, T1_A simultaneously.
-- 🪄 **Smart drag & drop** — drop 1–4 clouds (plus an optional `transforms.json`)
-  anywhere; files are auto-assigned to `T0 / T1 / T0_A / T1_A` by name, with
-  fallback to the next empty slot.
+- 🔳 **4-view mode (adaptive)** — with **4 clouds**: four quadrants (T0, T1, T0_A,
+  T1_A) via vertical **and** horizontal sliders. With **2 clouds**: left/right shows
+  the two clouds while top/bottom become two labeled bands you choose.
+- 🪄 **Smart drag & drop** — drop 1–4 clouds anywhere; files are auto-assigned to
+  `T0 / T1 / T0_A / T1_A` by name, with fallback to the next empty slot.
 - 📦 **Direct loaders** for `.ply` (ASCII + binary, little/big-endian), `.las`
   (uncompressed, double-precision coords), `.laz` (compressed) and `.npz`
   (NumPy archive).
-- 🎚️ **4×4 transforms** — apply matrices `A` to `T0`/`T1` (row-major
-  `transforms.json`) when you only have the raw clouds.
 - 🎨 **Color modes** — original RGB, flat color, or *T0 blue / T1 red*.
 - 🧭 **Orbit controls**, point-size control, reset view, fullscreen.
-- 🐛 **Debug panel** — active mode, matrices, recenter offset, point counts,
-  detected scalar fields, file paths.
+- 🐛 **Debug panel** — active mode, recenter offset, point counts, detected scalar
+  fields, file paths.
 - 🚀 **Big-data friendly** — global recentering for UTM-scale precision, screen-
   space point size, lean scenes.
 
@@ -63,17 +61,18 @@ Open <http://localhost:8080/>, then load a cloud into **T0** and another into
 **Drag & drop** (recommended): drop one or several files anywhere on the page.
 Each cloud is auto-assigned to a slot from its filename (`t0`, `t1`, `t0_A`,
 `t1_A`, also `pointCloud0/1`, `pc0/1`, …); anything unrecognized fills the next
-empty slot in order. A dropped `transforms.json` updates matrix `A`.
+empty slot in order.
 
 > Tick **“Demander l'assignation”** to get a dialog after each drop where you
 > choose the slot for every file (pre-filled with the smart guess) — otherwise
 > assignment is fully automatic.
 
 **Buttons** `T0`, `T1`, `T0_A`, `T1_A` accept any `.ply / .las / .laz / .npz`.
+Every cloud is loaded **as-is** from its file (no in-app transform).
 
-- Load **all four** files → they are displayed as-is (no matrix applied).
-- Load **only T0 and T1** → `T0_A` and `T1_A` are *synthesized* by applying
-  matrix `A` from `transforms.json` (fallback).
+- Load **all four** files → 4-view mode shows four quadrants.
+- Load **only T0 and T1** → the two-up modes work, and 4-view mode switches to the
+  *labeled-bands* layout (left/right = the two clouds, top/bottom = two chosen labels).
 
 **Auto-load**: drop files named `t0.*`, `t1.*`, `t0_A.*`, `t1_A.*` into
 `pointclouds/` and they load on startup.
@@ -100,12 +99,14 @@ Pick a mode from the dropdown.
 
 | Mode | Left | Right |
 |------|------|-------|
-| `T0 vs T1` | T0 | T1 |
-| `T0_A vs T1_A` | T0_A | T1_A |
-| `T0 vs T0_A` | T0 | T0_A |
-| `T1 vs T1_A` | T1 | T1_A |
+| `T0 ⇄ T1` | T0 | T1 |
+| `T0_A ⇄ T1_A` | T0_A | T1_A |
+| `T0 ⇄ T0_A` | T0 | T0_A |
+| `T1 ⇄ T1_A` | T1 | T1_A |
 
-**Quadrants (vertical + horizontal slider):**
+**4-view (vertical + horizontal slider) — adaptive to the number of clouds:**
+
+*With 4 clouds — quadrants:*
 
 ```
 ┌───────────┬───────────┐
@@ -116,30 +117,23 @@ Pick a mode from the dropdown.
         ↑ drag vertical slider ↔
 ```
 
+*With 2 clouds — labeled bands:* left/right shows the two clouds (vertical slider),
+while the top and bottom bands carry two labels picked from the loaded files (two
+dropdowns appear in the toolbar).
+
+```
+┌────── label (top) ──────┐
+│     T0     │     T1     │
+├────────────┼────────────┤   ← horizontal slider = band divider
+│     T0     │     T1     │
+└───── label (bottom) ────┘
+        ↑ vertical slider compares the two clouds ↔
+```
+
 All views share one camera, so they stay perfectly aligned while you orbit/zoom.
 
 Controls: **left-drag** rotate · **wheel** zoom · **right-drag** pan ·
 **drag handles** to move sliders (mouse + touch).
-
----
-
-## 🎚️ Transforms (`transforms.json`)
-
-Row-major 4×4 matrices, used **only as a fallback** when `T0_A`/`T1_A` files are
-not provided:
-
-```json
-{
-  "A": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]],
-  "B": [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]
-}
-```
-
-`A` is applied to both `T0 → T0_A` and `T1 → T1_A`. Helpers in `app.js`:
-
-- `matrixFromRowMajorArray(arr)` → `THREE.Matrix4` (uses `.set()`, row-major).
-- `applyTransform(positionsF64, arr)` → transforms points in **double precision**
-  (robust for UTM-scale coordinates).
 
 ---
 
@@ -187,15 +181,12 @@ dependency is three.js.
 
 ## 🛠️ Troubleshooting — clouds don't overlap
 
-1. **Identity test** — set `A = identity` and pick `T0 vs T0_A`. The two halves
-   must be identical. If so, the viewer is correct.
-2. **Georeferencing** — if T0 and T1 have different origins (UTM tiles), bake the
-   registration into `A` (`transforms.json`) or convert with a shared origin.
-3. **Row-major vs column-major** — `matrixFromRowMajorArray` expects **row-major**
-   (JSON rows = matrix rows). If the transform looks wrong, transpose it.
-4. **Scale** — a diagonal ≠ 1 in `A` introduces unintended scaling. The debug
-   panel prints the loaded matrices.
-5. **Wrong file** — the debug panel lists each layer's format, point count, path
+1. **Align upstream** — alignment is no longer done in the app. If T0 and T1 have
+   different origins (UTM tiles), bake the registration into the exported
+   `T0_A` / `T1_A` clouds, or convert everything to a shared origin before loading.
+2. **Identity check** — pick `T0 ⇄ T0_A`; if `T0_A` is the aligned T0, the two
+   halves should match where they overlap.
+3. **Wrong file** — the debug panel lists each layer's format, point count, path
    and detected scalar fields.
 
 ---
@@ -207,7 +198,7 @@ dependency is three.js.
 | T0 / T1 colors | `COL_T0`, `COL_T1` |
 | Default / range point size | `CFG.pointSize`, `setPointSize()` |
 | Slider reveal direction | `setScissor(...)` in `renderSplit()` |
-| Quadrant layout | `QUAD` map |
+| 4-view layout (2 vs 4 clouds) | `quadLayout()` |
 | Scalar-field coloring | scalars are already loaded in `layer.data.scalars` |
 
 ---
@@ -220,7 +211,6 @@ dependency is three.js.
 ├── style.css         # UI styling
 ├── app.js            # viewer: camera, scissor split, modes, sliders, UI
 ├── loaders.js        # PLY / LAS / LAZ / NPZ → unified format
-├── transforms.json   # example A/B matrices (row-major)
 ├── pointclouds/      # optional auto-loaded t0.* / t1.* / t0_A.* / t1_A.*
 └── README.md
 ```

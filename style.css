@@ -145,6 +145,34 @@ body{ display:flex; align-items:center; justify-content:center; padding:24px; }
 .cap-side.raw{ background:rgba(40,46,58,.85);    border-color:rgba(220,225,235,.55); }
 .cap-side.acc{ background:rgba(20,110,90,.85);   border-color:rgba(70,210,170,.95); }
 
+/* ── Mode « 4 vues » à 2 nuages : un label fixe par bande (haut / bas) ───────── */
+.quad-band{
+  position:absolute; left:50%; transform:translateX(-50%); display:none; z-index:46;
+  max-width:min(70%,420px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font-size:13px; font-weight:800; color:#fff; padding:5px 14px; border-radius:999px;
+  border:1px solid rgba(255,255,255,.22); pointer-events:none;
+  backdrop-filter:blur(7px); -webkit-backdrop-filter:blur(7px);
+  box-shadow:0 3px 14px rgba(0,0,0,.4);
+}
+.quad-band.top{    top:12px;    background:rgba(40,46,58,.85);  border-color:rgba(220,225,235,.55); }
+.quad-band.bottom{ bottom:12px; background:rgba(20,110,90,.85); border-color:rgba(70,210,170,.95); }
+.stage.quad-2pc .quad-band{ display:block; }
+/* en 2 nuages : on masque les chips de slider et les coins du bas (redondants) */
+.stage.quad-2pc .slider-cap,
+.stage.quad-2pc .slider-cap-h,
+.stage.quad-2pc .layer-label.quad.bl,
+.stage.quad-2pc .layer-label.quad.br{ display:none; }
+
+/* Sélecteurs de label de bande dans la barre d'outils (contextuels) */
+.quad-ctl{ display:none; align-items:center; gap:8px; }
+.quad-ctl.show{ display:inline-flex; }
+.quad-ctl .band-pick{ font-size:13px; color:var(--muted); display:flex; align-items:center; gap:6px; }
+.quad-ctl select{
+  font-size:13px; padding:6px 10px; border:1px solid #dfe3ea; border-radius:10px;
+  background:#fff; color:var(--ink); cursor:pointer; outline:none;
+}
+.quad-ctl select:focus{ border-color:var(--accent); box-shadow:0 0 0 3px rgba(37,99,235,.15); }
+
 /* Debug */
 .debug{
   margin:0; padding:14px 16px; background:#0f1116; color:#c9d4e3; border-radius:14px;

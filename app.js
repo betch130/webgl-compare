@@ -6,7 +6,7 @@
  * uniquement à droite du slider. Caméra partagée ⇒ alignement parfait, aucune
  * synchronisation nécessaire.
  *
- * 4 layers : T0_raw, T1_raw, T0_A (=T0×A), T1_B (=T1×B).
+ * 4 calques chargés depuis des fichiers : T0, T1, T0_A, T1_A.
  * Formats : PLY / LAS / LAZ / NPZ (voir loaders.js).
  * ==========================================================================*/
 
@@ -16,7 +16,6 @@ import { loadPointCloud } from "./loaders.js";
 
 /* ----------------------------- Configuration ----------------------------- */
 const CFG = {
-  transformsURL: "./transforms.json",
   // tentatives d'auto-chargement au démarrage (sinon : file pickers)
   autoload: {
     t0:  ["./pointclouds/t0.ply",   "./pointclouds/t0.las",   "./pointclouds/t0.laz",   "./pointclouds/t0.npz"],
@@ -28,7 +27,7 @@ const CFG = {
   bg: 0x0e1116,
 };
 
-/* 4 layers réels : T0, T1, T0_A, T1_A (A = même transfo appliquée à T0 et T1). */
+/* 4 calques réels : T0, T1, T0_A, T1_A (chacun chargé depuis son propre fichier). */
 const MODES = {
   raw:   { bottom: "T0",   top: "T1",   left: "T0",   right: "T1" },
   trans: { bottom: "T0_A", top: "T1_A", left: "T0_A", right: "T1_A" },
@@ -45,53 +44,28 @@ const S = {
   renderer: null, camera: null, controls: null,
   scenes: {},                // name → THREE.Scene (une scène par layer)
   layers: {},                // name → { points, data, source, path }
-  transforms: { A: identity(), B: identity() },
-  mode: "trans",
+  mode: "raw",
   colorMode: "rgb",
   askAssign: false,          // drag&drop : true = demander, false = auto
   pointSize: CFG.pointSize,
   sliderRatio: 0.5,          // slider vertical (x, 0..1 depuis la gauche)
   sliderRatioY: 0.5,         // slider horizontal (y, 0..1 depuis le haut) — mode quad
   offset: null,              // THREE.Vector3 (recentrage global, double→float)
-  // données brutes + chemins. t0a/t1a = fichiers transformés EXPLICITES (si fournis).
+  // mode "4 vues" à 2 nuages : slot choisi pour le label de chaque bande (haut/bas)
+  quadLabels: { top: "T0", bottom: "T1" },
+  // données brutes + chemins (4 fichiers réels).
   raw: { t0: null, t1: null, t0a: null, t1a: null },
 };
 
-/* Disposition des 4 quadrants (mode "quad") */
-const QUAD = { TL: "T0", TR: "T1", BL: "T0_A", BR: "T1_A" };
-
-function identity() { return [[1,0,0,0],[0,1,0,0],[0,0,1,0],[0,0,0,1]]; }
-
-/* ============================================================================
- * 1) MATRICES (row-major → THREE.Matrix4) + transformation des positions
- * ==========================================================================*/
-
-/** THREE.Matrix4 depuis un tableau row-major (4x4 imbriqué ou plat de 16). */
-export function matrixFromRowMajorArray(matrixArray) {
-  let r;
-  if (Array.isArray(matrixArray[0])) {
-    r = [].concat(matrixArray[0], matrixArray[1], matrixArray[2], matrixArray[3]);
-  } else {
-    r = matrixArray.slice(0, 16);
-  }
-  const m = new THREE.Matrix4();
-  m.set(r[0],r[1],r[2],r[3], r[4],r[5],r[6],r[7], r[8],r[9],r[10],r[11], r[12],r[13],r[14],r[15]);
-  return m;
-}
-
-/** Transforme un Float64Array de positions (N*3) par une matrice row-major,
- *  EN DOUBLE PRÉCISION (important pour les grandes coordonnées type UTM). */
-export function applyTransform(positionsF64, matrixArray) {
-  if (!matrixArray) return positionsF64;
-  const e = matrixFromRowMajorArray(matrixArray).elements; // column-major
-  const out = new Float64Array(positionsF64.length);
-  for (let i = 0; i < positionsF64.length; i += 3) {
-    const x = positionsF64[i], y = positionsF64[i+1], z = positionsF64[i+2];
-    out[i]   = e[0]*x + e[4]*y + e[8]*z  + e[12];
-    out[i+1] = e[1]*x + e[5]*y + e[9]*z  + e[13];
-    out[i+2] = e[2]*x + e[6]*y + e[10]*z + e[14];
-  }
-  return out;
+/** Disposition des 4 quadrants selon le nombre de nuages chargés.
+ *  4 nuages → quadrants distincts (comportement historique).
+ *  2 nuages (T0, T1) → gauche=T0 / droite=T1 répétés en haut et en bas : la colonne
+ *  montre les 2 nuages (slider vertical), la bande haut/bas ne porte que les labels. */
+function quadLayout() {
+  const has4 = !!(S.layers.T0_A && S.layers.T1_A);
+  return has4
+    ? { TL: "T0", TR: "T1", BL: "T0_A", BR: "T1_A" }
+    : { TL: "T0", TR: "T1", BL: "T0",   BR: "T1"   };
 }
 
 /* ============================================================================
@@ -109,7 +83,7 @@ function centerOf(positions) {
   return new THREE.Vector3((minx+maxx)/2, (miny+maxy)/2, (minz+maxz)/2);
 }
 
-/** Construit un THREE.Points à partir des données (positions déjà transformées).
+/** Construit un THREE.Points à partir des données chargées.
  *  Recentre par S.offset (fixé par le 1er nuage) et passe en Float32 pour le GPU. */
 function buildPoints(data) {
   if (!S.offset) S.offset = centerOf(data.positions);
@@ -146,14 +120,11 @@ function buildPoints(data) {
   return points;
 }
 
-/** Charge un fichier/URL → données, applique la matrice si fournie, construit le Points. */
-async function makeLayer(name, sourceOrData, matrixArray) {
+/** Charge un fichier/URL → données, construit le THREE.Points. */
+async function makeLayer(name, sourceOrData) {
   const data = sourceOrData.positions ? sourceOrData : await loadPointCloud(sourceOrData, name);
-  let positions = data.positions;
-  if (matrixArray) positions = applyTransform(positions, matrixArray);
-  const layerData = { ...data, positions };
-  const points = buildPoints(layerData);
-  S.layers[name] = { points, data: layerData, source: data.source, path: typeof sourceOrData === "string" ? sourceOrData : (sourceOrData.name || "(fichier)") };
+  const points = buildPoints(data);
+  S.layers[name] = { points, data, source: data.source, path: typeof sourceOrData === "string" ? sourceOrData : (sourceOrData.name || "(fichier)") };
 }
 
 /* ============================================================================
@@ -164,27 +135,20 @@ async function rebuildLayers() {
   S.layers = {};
   S.offset = null; // recalculé sur le 1er nuage construit
 
-  // T0 / T1 : bruts, aucune transformation
-  await makeLayer("T0", S.raw.t0.data, null);
-  await makeLayer("T1", S.raw.t1.data, null);
+  // T0 / T1 : toujours requis (déclencheurs de la reconstruction)
+  await makeLayer("T0", S.raw.t0.data);
+  await makeLayer("T1", S.raw.t1.data);
+  S.layers.T0.path = S.raw.t0.path;
+  S.layers.T1.path = S.raw.t1.path;
 
-  // T0_A / T1_A :
-  //  - si un fichier transformé EXPLICITE est fourni → on le charge tel quel
-  //  - sinon (repli) → on applique la matrice A aux bruts
-  if (S.raw.t0a) await makeLayer("T0_A", S.raw.t0a.data, null);
-  else           await makeLayer("T0_A", S.raw.t0.data, S.transforms.A);
-  if (S.raw.t1a) await makeLayer("T1_A", S.raw.t1a.data, null);
-  else           await makeLayer("T1_A", S.raw.t1.data, S.transforms.A);
+  // T0_A / T1_A : construits UNIQUEMENT si leur fichier est fourni (plus de synthèse)
+  if (S.raw.t0a) { await makeLayer("T0_A", S.raw.t0a.data); S.layers.T0_A.path = S.raw.t0a.path; }
+  if (S.raw.t1a) { await makeLayer("T1_A", S.raw.t1a.data); S.layers.T1_A.path = S.raw.t1a.path; }
 
-  // chemins pour le debug
-  S.layers.T0.path   = S.raw.t0.path;
-  S.layers.T1.path   = S.raw.t1.path;
-  S.layers.T0_A.path = (S.raw.t0a || S.raw.t0).path;
-  S.layers.T1_A.path = (S.raw.t1a || S.raw.t1).path;
-
-  // Une scène dédiée par layer (pas de reparentage : on choisit les scènes au rendu)
+  // Une scène dédiée par calque PRÉSENT (on choisit les scènes au rendu)
   S.scenes = {};
   for (const n of ["T0", "T1", "T0_A", "T1_A"]) {
+    if (!S.layers[n]) continue;
     const sc = new THREE.Scene();
     sc.add(S.layers[n].points);
     S.scenes[n] = sc;
@@ -225,8 +189,35 @@ function capChip(text, cls) {
   return s;
 }
 
+/** Texte d'un slot : nom de fichier si chargé, sinon le tag du slot en repli. */
+function slotText(slot) { return layerFileName(slot) || slot; }
+
+/** Remplit les 2 menus de choix de label (mode 4 vues à 2 nuages) avec les nuages
+ *  chargés (texte = nom de fichier, valeur = slot), en conservant un choix valide. */
+function populateBandPickers() {
+  const loaded = ["T0", "T1", "T0_A", "T1_A"].filter((n) => S.layers[n]);
+  for (const [id, key] of [["label-top-pick", "top"], ["label-bottom-pick", "bottom"]]) {
+    const sel = document.getElementById(id);
+    sel.innerHTML = "";
+    for (const n of loaded) {
+      const o = document.createElement("option");
+      o.value = n; o.textContent = slotText(n);
+      sel.appendChild(o);
+    }
+    const want = loaded.includes(S.quadLabels[key]) ? S.quadLabels[key] : (loaded[0] || "");
+    S.quadLabels[key] = want; sel.value = want;
+  }
+}
+
+/** Met à jour le texte affiché des deux bandes (haut/bas) depuis les slots choisis. */
+function updateQuadBands() {
+  document.getElementById("quad-band-top").textContent = slotText(S.quadLabels.top);
+  document.getElementById("quad-band-bottom").textContent = slotText(S.quadLabels.bottom);
+}
+
 /** Légende attachée à chaque slider : ce qu'on voit de part et d'autre.
- *  Vertical → gauche/droite ; horizontal (quad) → haut/bas. */
+ *  Vertical → gauche/droite ; horizontal (quad) → haut/bas.
+ *  Le texte est dérivé des noms de fichiers (repli : tag du slot). */
 function setSliderCaptions(key) {
   const capV = document.getElementById("cap-v");
   const capH = document.getElementById("cap-h");
@@ -234,13 +225,21 @@ function setSliderCaptions(key) {
   const epoch = (slot) => (slot.startsWith("T0") ? "t0" : "t1");
 
   if (key === "quad") {
-    // vertical = époques (T0 ◀ ▶ T1) ; horizontal = brut ▲ ▼ aligné ×A
-    capV.append(capChip("◀ T0", "t0"), capChip("T1 ▶", "t1"));
-    capH.append(capChip("▲ T0 · T1", "raw"), capChip("T0_A · T1_A ▼", "acc"));
+    const has4 = !!(S.layers.T0_A && S.layers.T1_A);
+    if (has4) {
+      // 4 nuages : légendes historiques (tags de slot) — comportement inchangé
+      capV.append(capChip("◀ T0", "t0"), capChip("T1 ▶", "t1"));
+      capH.append(capChip("▲ T0 · T1", "raw"), capChip("T0_A · T1_A ▼", "acc"));
+    } else {
+      // 2 nuages : colonnes = les 2 nuages ; bandes haut/bas = labels choisis
+      capV.append(capChip("◀ " + slotText("T0"), "t0"), capChip(slotText("T1") + " ▶", "t1"));
+      capH.append(capChip("▲ " + slotText(S.quadLabels.top), "raw"),
+                  capChip(slotText(S.quadLabels.bottom) + " ▼", "acc"));
+    }
   } else {
     const m = MODES[key];
-    capV.append(capChip("◀ " + m.left, epoch(m.left)),
-                capChip(m.right + " ▶", epoch(m.right)));
+    capV.append(capChip("◀ " + slotText(m.left), epoch(m.left)),
+                capChip(slotText(m.right) + " ▶", epoch(m.right)));
   }
 }
 
@@ -250,15 +249,21 @@ function setMode(key) {
   const stage = document.getElementById("stage");
 
   if (key === "quad") {
-    // 4 quadrants : on affiche les 2 sliders + 4 labels de coin
+    const has4 = !!(S.layers.T0_A && S.layers.T1_A);
+    const q = quadLayout();
     stage.classList.add("quad-mode");
-    setLabel("label-tl", QUAD.TL);
-    setLabel("label-tr", QUAD.TR);
-    setLabel("label-bl", QUAD.BL);
-    setLabel("label-br", QUAD.BR);
+    stage.classList.toggle("quad-2pc", !has4);   // 2 nuages : bandes étiquetées
+    setLabel("label-tl", q.TL);
+    setLabel("label-tr", q.TR);
+    setLabel("label-bl", q.BL);
+    setLabel("label-br", q.BR);
+    if (!has4) { populateBandPickers(); updateQuadBands(); }
+    document.getElementById("quad-ctl").classList.toggle("show", !has4);
   } else {
     // comparaison 2-à-2 classique
     stage.classList.remove("quad-mode");
+    stage.classList.remove("quad-2pc");
+    document.getElementById("quad-ctl").classList.remove("show");
     const m = MODES[key];
     setLabel("label-left",  m.left);
     setLabel("label-right", m.right);
@@ -288,10 +293,10 @@ function setLayerColor(name, kind, color) {
 }
 
 function applyColorMode() {
-  // layers concernés : les 4 en mode quad, sinon la paire du mode
-  const names = (S.mode === "quad")
+  // layers concernés : les 4 en mode quad, sinon la paire du mode — calques présents only
+  const names = ((S.mode === "quad")
     ? ["T0", "T1", "T0_A", "T1_A"]
-    : [MODES[S.mode].bottom, MODES[S.mode].top];
+    : [MODES[S.mode].bottom, MODES[S.mode].top]).filter((n) => S.layers[n]);
   for (const n of names) {
     if (S.colorMode === "rgb")        setLayerColor(n, "rgb");
     else if (S.colorMode === "fixed") setLayerColor(n, "fixed", COL_FIXED);
@@ -343,7 +348,7 @@ function animate() {
 
 /** Rend une scène dans une région (coords three : origine en bas-à-gauche). */
 function renderRegion(scene, x, y, w, h) {
-  if (w <= 0 || h <= 0) return;
+  if (!scene || w <= 0 || h <= 0) return;   // scène absente (calque non chargé) : on saute
   S.renderer.setScissorTest(true);
   S.renderer.setViewport(0, 0, S.renderer.domElement.clientWidth, S.renderer.domElement.clientHeight);
   S.renderer.setScissor(x, y, w, h);
@@ -360,7 +365,7 @@ function renderSplit() {
   S.renderer.setScissorTest(false);
   S.renderer.setViewport(0, 0, w, h);
   S.renderer.clear(true, true, true);
-  S.renderer.render(S.scenes[m.bottom], S.camera);
+  if (S.scenes[m.bottom]) S.renderer.render(S.scenes[m.bottom], S.camera);
 
   const sx = Math.round(S.sliderRatio * w);
   renderRegion(S.scenes[m.top], sx, 0, w - sx, h);
@@ -380,10 +385,11 @@ function renderQuad() {
   S.renderer.clear(true, true, true);
 
   // three : y=0 en bas → la bande "haut" commence à y = h - syTop
-  renderRegion(S.scenes[QUAD.TL], 0,  h - syTop, sx,     syTop);        // haut-gauche
-  renderRegion(S.scenes[QUAD.TR], sx, h - syTop, w - sx, syTop);        // haut-droite
-  renderRegion(S.scenes[QUAD.BL], 0,  0,         sx,     h - syTop);    // bas-gauche
-  renderRegion(S.scenes[QUAD.BR], sx, 0,         w - sx, h - syTop);    // bas-droite
+  const q = quadLayout();
+  renderRegion(S.scenes[q.TL], 0,  h - syTop, sx,     syTop);        // haut-gauche
+  renderRegion(S.scenes[q.TR], sx, h - syTop, w - sx, syTop);        // haut-droite
+  renderRegion(S.scenes[q.BL], 0,  0,         sx,     h - syTop);    // bas-gauche
+  renderRegion(S.scenes[q.BR], sx, 0,         w - sx, h - syTop);    // bas-droite
   S.renderer.setScissorTest(false);
 }
 
@@ -450,7 +456,7 @@ function setupOneSlider(el, ratioFromEvent, apply) {
 }
 
 /* ============================================================================
- * 8) UI (boutons, file pickers, transforms)
+ * 8) UI (boutons, file pickers)
  * ==========================================================================*/
 
 function setupUI() {
@@ -478,14 +484,12 @@ function setupUI() {
   // Réglage drag&drop : demander l'assignation, ou auto
   document.getElementById("ask-assign").addEventListener("change", (e) => { S.askAssign = e.target.checked; });
 
-  // transforms.json
-  document.getElementById("file-tr").addEventListener("change", async (e) => {
-    const f = e.target.files[0]; if (!f) return;
-    const j = JSON.parse(await f.text());
-    S.transforms.A = j.A || identity();
-    S.transforms.B = j.B || identity();
-    if (S.raw.t0 && S.raw.t1) await rebuildLayers();
-    updateDebug();
+  // Choix des labels de bande (mode 4 vues à 2 nuages)
+  document.getElementById("label-top-pick").addEventListener("change", (e) => {
+    S.quadLabels.top = e.target.value; updateQuadBands(); setSliderCaptions(S.mode);
+  });
+  document.getElementById("label-bottom-pick").addEventListener("change", (e) => {
+    S.quadLabels.bottom = e.target.value; updateQuadBands(); setSliderCaptions(S.mode);
   });
 }
 
@@ -495,7 +499,7 @@ async function onFile(which, file) {
   const data = await loadPointCloud(file, file.name);
   S.raw[which] = { data, path: file.name };
   // On (re)construit dès que T0 et T1 sont présents ; t0a/t1a sont pris en compte
-  // automatiquement s'ils sont chargés (sinon repli matrice A).
+  // automatiquement s'ils sont chargés (sinon les calques _A restent absents).
   if (S.raw.t0 && S.raw.t1) await rebuildLayers();
   else setStatus(`${which} chargé (${data.count.toLocaleString()} pts). Charge au moins T0 et T1.`);
 }
@@ -515,9 +519,9 @@ function toggleFullscreen() {
 /* ============================================================================
  * 8b) DRAG & DROP INTELLIGENT
  * --------------------------------------------------------------------------
- * Dépose 1 à 4 nuages (+ éventuellement transforms.json) n'importe où.
- * Chaque fichier est assigné à un slot selon son nom ; les fichiers non
- * reconnus remplissent les slots vides dans l'ordre T0, T1, T0_A, T1_A.
+ * Dépose 1 à 4 nuages n'importe où. Chaque fichier est assigné à un slot selon
+ * son nom ; les fichiers non reconnus remplissent les slots vides dans l'ordre
+ * T0, T1, T0_A, T1_A.
  * ==========================================================================*/
 
 const SLOT_LABEL = { t0: "T0", t1: "T1", t0a: "T0_A", t1a: "T1_A" };
@@ -549,18 +553,8 @@ function autoAssignMap(clouds) {
   return map;
 }
 
-async function applyTransformsFile(tr) {
-  if (!tr) return;
-  try {
-    const j = JSON.parse(await tr.text());
-    S.transforms.A = j.A || identity();
-    S.transforms.B = j.B || identity();
-  } catch (e) { console.warn("transforms.json invalide", e); }
-}
-
-/** Charge un mapping slot→fichier + transforms.json éventuel. */
-async function loadAssignments(map, tr) {
-  await applyTransformsFile(tr);
+/** Charge un mapping slot→fichier. */
+async function loadAssignments(map) {
   const order = ["t0", "t1", "t0a", "t1a"];
   const msgs = [];
   for (const slot of order) {
@@ -581,15 +575,14 @@ async function loadAssignments(map, tr) {
 
 /** Point d'entrée du drop : auto, ou ouverture du dialogue selon le réglage. */
 function handleDrop(files) {
-  const tr = files.find(f => /\.json$/i.test(f.name));
   const clouds = files.filter(f => /\.(ply|las|laz|npz)$/i.test(f.name));
-  if (!clouds.length && !tr) { setStatus("Aucun fichier exploitable déposé."); return; }
-  if (S.askAssign && clouds.length) openAssignDialog(clouds, tr);
-  else loadAssignments(autoAssignMap(clouds), tr);
+  if (!clouds.length) { setStatus("Aucun fichier exploitable déposé."); return; }
+  if (S.askAssign) openAssignDialog(clouds);
+  else loadAssignments(autoAssignMap(clouds));
 }
 
 /** Boîte de dialogue : choisir le slot de chaque fichier (pré-rempli par la devinette). */
-function openAssignDialog(clouds, tr) {
+function openAssignDialog(clouds) {
   const modal = document.getElementById("assign-modal");
   const body = document.getElementById("assign-rows");
   const guess = autoAssignMap(clouds);
@@ -613,13 +606,6 @@ function openAssignDialog(clouds, tr) {
     row.append(name, sel);
     body.appendChild(row);
   });
-  if (tr) {
-    const note = document.createElement("div");
-    note.className = "assign-note";
-    note.textContent = `transforms.json : ${tr.name} (matrice A appliquée en repli)`;
-    body.appendChild(note);
-  }
-
   modal.classList.add("show");
   const ok = document.getElementById("assign-ok");
   const cancel = document.getElementById("assign-cancel");
@@ -631,7 +617,7 @@ function openAssignDialog(clouds, tr) {
       if (sel.value) map[sel.value] = clouds[+sel.dataset.idx];  // dernier gagne si doublon
     });
     close();
-    await loadAssignments(map, tr);
+    await loadAssignments(map);
   };
 }
 
@@ -652,34 +638,28 @@ function setupDragDrop() {
  * 9) DEBUG
  * ==========================================================================*/
 
-function fmtMatrix(a) {
-  const rows = Array.isArray(a[0]) ? a : [a.slice(0,4),a.slice(4,8),a.slice(8,12),a.slice(12,16)];
-  return rows.map(r => "[ " + r.map(x => String(x).padStart(6)).join(", ") + " ]").join("\n            ");
-}
-
 function setStatus(msg) { document.getElementById("debug").textContent = msg; }
 
 function updateDebug() {
   const L = S.layers;
+  const has4 = !!(L.T0_A && L.T1_A);
   const desc = (S.mode === "quad")
-    ? "T0 | T1 | T0_A | T1_A (quadrants)"
+    ? (has4 ? "T0 | T1 | T0_A | T1_A (quadrants)" : "T0 | T1 (4 vues, 2 nuages — bandes étiquetées)")
     : `${MODES[S.mode].left}  ▸  ${MODES[S.mode].right}`;
   const out = [];
   out.push(`mode actif    : ${S.mode}  (${desc})`);
   out.push(`couleur       : ${S.colorMode}     taille point : ${S.pointSize.toFixed(2)} px`);
   out.push(`offset (recentrage) : ${S.offset ? `[${S.offset.x.toFixed(1)}, ${S.offset.y.toFixed(1)}, ${S.offset.z.toFixed(1)}]` : "—"}`);
   out.push("");
-  out.push(`matrice A     : ${fmtMatrix(S.transforms.A)}`);
-  out.push(`matrice B     : ${fmtMatrix(S.transforms.B)}`);
-  out.push("");
   out.push("layers :");
   for (const k of ["T0","T1","T0_A","T1_A"]) {
     if (L[k]) {
       const sc = Object.keys(L[k].data.scalars || {});
-      const synth = (k === "T0_A" && !S.raw.t0a) || (k === "T1_A" && !S.raw.t1a);
       out.push(`  ${k.padEnd(5)} : ${L[k].source.toUpperCase().padEnd(4)} ${String(L[k].data.count).padStart(9)} pts  ${L[k].path}` +
-               (synth ? "  (synthétisé ×A)" : "  (fichier)") +
+               "  (fichier)" +
                (sc.length ? `  scalaires=[${sc.join(",")}]` : ""));
+    } else {
+      out.push(`  ${k.padEnd(5)} : —  (non chargé)`);
     }
   }
   document.getElementById("debug").textContent = out.join("\n");
@@ -690,12 +670,6 @@ function updateDebug() {
  * ==========================================================================*/
 
 async function tryAutoload() {
-  // transforms.json
-  try {
-    const r = await fetch(CFG.transformsURL);
-    if (r.ok) { const j = await r.json(); S.transforms.A = j.A || identity(); S.transforms.B = j.B || identity(); }
-  } catch (_) {}
-
   // nuages t0/t1 (premier chemin qui répond)
   async function firstExisting(cands) {
     for (const u of cands) { try { if ((await fetch(u, { method: "HEAD" })).ok) return u; } catch (_){} }
